@@ -1,0 +1,29 @@
+/* Chat page layout — tokens only. */
+
+.kg-chat-page { padding-bottom: var(--kg-space-6); }
+
+.kg-chat__layout {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+  gap: var(--kg-space-4);
+  align-items: start;
+}
+
+.kg-chat__thread {
+  min-height: 420px;
+}
+
+.kg-chat__composer {
+  display: flex;
+  gap: var(--kg-space-2);
+  align-items: flex-end;
+  position: sticky;
+  bottom: var(--kg-space-4);
+  padding: var(--kg-space-3);
+  background: var(--kg-surface);
+  border: 1px solid var(--kg-border);
+  border-radius: var(--kg-radius-lg);
+  box-shadow: var(--kg-shadow-md);
+}
+
+.kg-chat__composer .kg-textarea { margin-bottom: 0; }

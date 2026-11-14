@@ -1,0 +1,148 @@
+/*
+ * KnowGraph AI — design tokens (brief §17).
+ *
+ * EVERY colour, radius, shadow, spacing step and font used by the UI is declared
+ * here. Components reference `var(--kg-*)` only, never raw values, so redesigning
+ * the interface later means editing this one file — no component or business
+ * logic changes are required.
+ *
+ * Themes: :root defines the light theme; [data-theme="dark"] overrides the colour
+ * tokens. Toggle by setting `document.documentElement.dataset.theme`.
+ */
+
+:root {
+  /* --- Brand colours (prototype palette: warm terracotta / paper) ------- */
+  --kg-primary: #b35b3c;
+  --kg-primary-hover: #9d4d31;
+  --kg-primary-soft: #f4e9de;
+  --kg-primary-foreground: #ffffff;
+  --kg-secondary: #f0f2ec;
+  --kg-secondary-soft: #e6ebdf;
+  --kg-secondary-foreground: #475344;
+  --kg-accent: #f4e9de;
+  --kg-accent-foreground: #9a5035;
+
+  /* --- Surfaces ------------------------------------------------------- */
+  --kg-background: #f9faf7;
+  --kg-surface: #ffffff;
+  --kg-surface-alt: #f0f2ec;
+  --kg-surface-raised: #fffefa;
+  --kg-overlay: rgba(48, 53, 47, 0.45);
+  --kg-sidebar: #fffefa;
+  --kg-sidebar-border: #e5e8df;
+
+  /* --- Text ----------------------------------------------------------- */
+  --kg-text: #313930;
+  --kg-text-soft: #475344;
+  --kg-muted: #7b8077;
+  --kg-inverse-text: #ffffff;
+  --kg-sidebar-foreground: #313930;
+  --kg-sidebar-muted: #7b8077;
+
+  /* --- Borders -------------------------------------------------------- */
+  --kg-border: #e5e8df;
+  --kg-border-strong: #d3d8ca;
+
+  /* --- Status colours (muted, paper-toned) ----------------------------- */
+  --kg-success: #5e7d54;
+  --kg-success-soft: #e6efe0;
+  --kg-warning: #a3762a;
+  --kg-warning-soft: #f7ecd7;
+  --kg-danger: #a33f2f;
+  --kg-danger-soft: #f6e3de;
+  --kg-info: #4a6b7c;
+  --kg-info-soft: #e2ecf1;
+
+  /* --- Typography ----------------------------------------------------- */
+  --kg-font-sans: Arial, Helvetica, sans-serif;
+  --kg-font-serif: Georgia, "Times New Roman", serif;
+  --kg-font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  --kg-font-size-xs: 0.75rem;
+  --kg-font-size-sm: 0.8125rem;
+  --kg-font-size-base: 0.9375rem;
+  --kg-font-size-lg: 1.0625rem;
+  --kg-font-size-xl: 1.375rem;
+  --kg-font-size-2xl: 1.75rem;
+  --kg-line-height: 1.55;
+  --kg-font-weight-medium: 500;
+  --kg-font-weight-semibold: 600;
+
+  /* --- Document color accents (from improve-UI prototype) ----------------- */
+  --kg-color-peach: #f5e7dc;
+  --kg-color-sage: #eaf0e4;
+  --kg-color-lavender: #eeebf3;
+  --kg-color-sand: #f4f0df;
+  --kg-color-ink-soft: #697064;
+
+  /* --- Spacing scale (4px base) --------------------------------------- */
+  --kg-space-1: 0.25rem;
+  --kg-space-2: 0.5rem;
+  --kg-space-3: 0.75rem;
+  --kg-space-4: 1rem;
+  --kg-space-5: 1.5rem;
+  --kg-space-6: 2rem;
+  --kg-space-7: 3rem;
+
+  /* --- Radii (prototype uses 5-13px) ----------------------------------- */
+  --kg-radius-sm: 5px;
+  --kg-radius-md: 7px;
+  --kg-radius-lg: 10px;
+  --kg-radius-pill: 999px;
+
+  /* --- Shadows -------------------------------------------------------- */
+  --kg-shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
+  --kg-shadow-md: 0 4px 12px rgba(15, 23, 42, 0.08);
+  --kg-shadow-lg: 0 12px 32px rgba(15, 23, 42, 0.12);
+  --kg-shadow-xl: 0 16px 48px rgba(15, 23, 42, 0.14);
+  --kg-card-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 1px 3px rgba(15, 23, 42, 0.06);
+  --kg-card-shadow-hover: 0 4px 12px rgba(15, 23, 42, 0.08), 0 2px 4px rgba(15, 23, 42, 0.04);
+
+  /* --- Motion --------------------------------------------------------- */
+  --kg-transition-fast: 120ms ease;
+  --kg-transition: 180ms ease;
+
+  /* --- Layout --------------------------------------------------------- */
+  --kg-sidebar-width: 240px;
+  --kg-navbar-height: 60px;
+  --kg-content-max-width: 1200px;
+  --kg-sidebar-bg: var(--kg-sidebar);
+  --kg-sidebar-border: var(--kg-sidebar-border);
+  --kg-card-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 1px 3px rgba(15, 23, 42, 0.06);
+  --kg-card-shadow-hover: 0 4px 12px rgba(15, 23, 42, 0.08), 0 2px 4px rgba(15, 23, 42, 0.04);
+  --kg-sidebar-width-collapsed: 64px;
+}
+
+[data-theme='dark'] {
+  --kg-primary: #818cf8;
+  --kg-primary-hover: #a5b4fc;
+  --kg-primary-soft: #1e1b4b;
+  --kg-secondary: #2dd4bf;
+  --kg-secondary-soft: #042f2e;
+
+  --kg-background: #0b1120;
+  --kg-surface: #111a2e;
+  --kg-surface-alt: #16203a;
+  --kg-surface-raised: #16203a;
+  --kg-overlay: rgba(2, 6, 23, 0.7);
+
+  --kg-text: #e8eefc;
+  --kg-text-soft: #c3cde3;
+  --kg-muted: #8fa0c0;
+  --kg-inverse-text: #0b1120;
+
+  --kg-border: #22304d;
+  --kg-border-strong: #33436b;
+
+  --kg-success: #4ade80;
+  --kg-success-soft: #052e16;
+  --kg-warning: #fbbf24;
+  --kg-warning-soft: #3b2708;
+  --kg-danger: #f87171;
+  --kg-danger-soft: #450a0a;
+  --kg-info: #93c5fd;
+  --kg-info-soft: #0b2447;
+
+  --kg-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --kg-shadow-md: 0 4px 14px rgba(0, 0, 0, 0.45);
+  --kg-shadow-lg: 0 14px 40px rgba(0, 0, 0, 0.55);
+}

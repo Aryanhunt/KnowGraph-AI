@@ -1,0 +1,164 @@
+/* Analytics page — theme-native (kg tokens only, dark-mode safe).
+ *
+ * No hard-coded palette: every surface, text colour, border, shadow and status
+ * tint resolves through var(--kg-*), so light/dark and any token recolour just
+ * work. Motion is subtle: staggered fade-up on entry, animated accuracy meter.
+ */
+
+/* --- Entrance animation (staggered via inline animation-delay) --------- */
+@keyframes kg-fade-up {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: none; }
+}
+.kg-fade-in { animation: kg-fade-up 420ms cubic-bezier(.22,.9,.28,1) both; }
+
+/* --- Hero -------------------------------------------------------------- */
+.kg-analytics-hero {
+  border: 1px solid var(--kg-border);
+  border-radius: var(--kg-radius-lg);
+  background:
+    radial-gradient(120% 160% at 100% 0%, var(--kg-primary-soft) 0%, transparent 55%),
+    var(--kg-surface);
+  padding: var(--kg-space-5);
+  box-shadow: var(--kg-card-shadow);
+}
+.kg-analytics-hero .kg-hero__eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--kg-space-2);
+  font-size: var(--kg-font-size-xs);
+  letter-spacing: 0.14em;
+  font-weight: var(--kg-font-weight-semibold);
+  color: var(--kg-primary);
+}
+
+/* --- Hero stat chips --------------------------------------------------- */
+.kg-analytics-hero-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--kg-space-3);
+}
+.kg-analytics-stat {
+  display: flex;
+  align-items: center;
+  gap: var(--kg-space-3);
+  padding: var(--kg-space-3) var(--kg-space-4);
+  transition: box-shadow var(--kg-transition), transform var(--kg-transition),
+    border-color var(--kg-transition);
+}
+.kg-analytics-stat:hover { transform: translateY(-2px); }
+.kg-analytics-stat-icon {
+  width: 40px; height: 40px;
+  display: grid; place-items: center;
+  border-radius: var(--kg-radius-md);
+  background: var(--kg-primary-soft);
+  color: var(--kg-primary);
+  flex-shrink: 0;
+}
+.kg-analytics-stat strong {
+  display: block;
+  font-family: var(--kg-font-serif, Georgia, serif);
+  font-size: 1.6rem;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  color: var(--kg-text);
+}
+.kg-analytics-stat small {
+  font-size: var(--kg-font-size-xs);
+  color: var(--kg-muted);
+}
+
+/* --- Cards (progress / gaps) ------------------------------------------- */
+.kg-analytics-card { padding: var(--kg-space-4); }
+.kg-analytics-card-head {
+  display: flex;
+  align-items: center;
+  gap: var(--kg-space-3);
+  margin-bottom: var(--kg-space-3);
+}
+.kg-analytics-card-title {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: var(--kg-font-size-base);
+  font-weight: var(--kg-font-weight-semibold);
+  color: var(--kg-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kg-analytics-status-icon {
+  width: 32px; height: 32px;
+  display: grid; place-items: center;
+  border-radius: var(--kg-radius-md);
+  flex-shrink: 0;
+}
+.kg-analytics-card-reason {
+  margin: 0 0 var(--kg-space-2);
+  font-size: var(--kg-font-size-sm);
+  color: var(--kg-text-soft);
+  line-height: 1.65;
+}
+.kg-analytics-card-meta {
+  font-size: var(--kg-font-size-xs);
+  color: var(--kg-muted);
+}
+
+/* --- Accuracy meter (animated fill) ------------------------------------ */
+.kg-analytics-meter {
+  height: 8px;
+  border-radius: var(--kg-radius-pill);
+  background: var(--kg-surface-alt);
+  overflow: hidden;
+  margin: var(--kg-space-2) 0 var(--kg-space-3);
+}
+.kg-analytics-meter > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--kg-primary), var(--kg-primary-hover));
+}
+
+/* --- Secondary list rows ----------------------------------------------- */
+.kg-analytics-mini {
+  padding: var(--kg-space-2) var(--kg-space-3);
+  border: 1px solid var(--kg-border);
+  border-radius: var(--kg-radius-md);
+  background: var(--kg-background);
+}
+.kg-analytics-rule { text-align: right; line-height: 1.55; }
+
+/* --- All-topics table --------------------------------------------------- */
+.kg-analytics-topics-card { padding: var(--kg-space-2) var(--kg-space-4); }
+.kg-analytics-topic-row {
+  padding: var(--kg-space-2) 0;
+  border-bottom: 1px solid var(--kg-border);
+}
+.kg-analytics-topic-row:last-child { border-bottom: 0; }
+.kg-analytics-topic-row:hover { background: var(--kg-surface-alt); }
+
+/* --- Section heading / footer ------------------------------------------ */
+.kg-analytics-section-title {
+  margin: 0;
+  font-family: var(--kg-font-serif, Georgia, serif);
+  font-weight: 400;
+  font-size: 1.35rem;
+  letter-spacing: -0.01em;
+  color: var(--kg-text);
+}
+.kg-analytics-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--kg-space-3);
+  border-top: 1px solid var(--kg-border);
+  padding-top: var(--kg-space-4);
+  margin-top: var(--kg-space-2);
+}
+
+/* Respect reduced-motion: skip entrance + meter animation. */
+@media (prefers-reduced-motion: reduce) {
+  .kg-fade-in { animation: none; }
+  .kg-analytics-meter > span { transition: none !important; }
+  .kg-analytics-stat:hover { transform: none; }
+}

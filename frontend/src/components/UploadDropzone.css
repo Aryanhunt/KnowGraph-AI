@@ -1,0 +1,57 @@
+/* UploadDropzone styles — tokens only (brief §17). */
+
+.kg-upload {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kg-space-4);
+}
+
+.kg-upload__zone {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: var(--kg-space-3);
+  padding: var(--kg-space-6) var(--kg-space-4);
+  text-align: center;
+  border: 2px dashed var(--kg-border-strong);
+  border-radius: var(--kg-radius-lg);
+  background: var(--kg-surface-alt);
+  cursor: pointer;
+  transition: border-color var(--kg-transition-fast), background var(--kg-transition-fast);
+}
+
+.kg-upload__zone:hover {
+  border-color: var(--kg-primary);
+  background: var(--kg-primary-soft);
+}
+
+.kg-upload__zone--dragging {
+  border-color: var(--kg-primary);
+  background: var(--kg-primary-soft);
+}
+
+.kg-upload__icon {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--kg-surface);
+  border: 1px solid var(--kg-border);
+  font-size: var(--kg-font-size-lg);
+  color: var(--kg-primary);
+}
+
+.kg-upload__list {
+  border: 1px solid var(--kg-border);
+  border-radius: var(--kg-radius-md);
+  padding: var(--kg-space-3);
+  background: var(--kg-surface);
+}
+
+.kg-upload__item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kg-space-1);
+}

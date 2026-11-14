@@ -1,0 +1,26 @@
+/* Auth page styles — tokens only. */
+
+.kg-auth {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--kg-space-6) var(--kg-space-4);
+  background:
+    radial-gradient(600px 300px at 20% 15%, var(--kg-primary-soft), transparent),
+    var(--kg-background);
+}
+
+.kg-auth__card {
+  width: min(440px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: var(--kg-space-4);
+}
+
+.kg-auth__brand {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--kg-space-2);
+}

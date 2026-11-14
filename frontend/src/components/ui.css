@@ -1,0 +1,137 @@
+/*
+ * Design-system stylesheet — structural primitives (brief §17).
+ *
+ * Button, Card, Badge, StatusPill and Tabs are styled here using design tokens
+ * only. A redesign therefore edits `theme/tokens.css` and these stylesheets —
+ * never the components' logic.
+ */
+
+/* --- Button ----------------------------------------------------------- */
+.kg-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--kg-space-2);
+  padding: 0.5rem 0.9rem;
+  border-radius: var(--kg-radius-md);
+  border: 1px solid transparent;
+  font-family: inherit;
+  font-size: var(--kg-font-size-sm);
+  font-weight: var(--kg-font-weight-medium);
+  line-height: 1.2;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--kg-transition-fast), color var(--kg-transition-fast),
+    border-color var(--kg-transition-fast), box-shadow var(--kg-transition-fast);
+}
+.kg-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+.kg-btn:focus-visible {
+  outline: 2px solid var(--kg-primary);
+  outline-offset: 2px;
+}
+
+.kg-btn--primary { background: var(--kg-primary); color: var(--kg-inverse-text); }
+.kg-btn--primary:hover:not(:disabled) { background: var(--kg-primary-hover); }
+
+.kg-btn--secondary {
+  background: var(--kg-surface);
+  color: var(--kg-text);
+  border-color: var(--kg-border-strong);
+}
+.kg-btn--secondary:hover:not(:disabled) { background: var(--kg-surface-alt); }
+
+.kg-btn--ghost { background: transparent; color: var(--kg-text-soft); }
+.kg-btn--ghost:hover:not(:disabled) { background: var(--kg-surface-alt); color: var(--kg-text); }
+
+.kg-btn--danger { background: var(--kg-danger); color: var(--kg-inverse-text); }
+.kg-btn--danger:hover:not(:disabled) { filter: brightness(1.06); }
+
+.kg-btn--success { background: var(--kg-success); color: var(--kg-inverse-text); }
+
+.kg-btn--sm { padding: 0.3rem 0.6rem; font-size: var(--kg-font-size-xs); }
+.kg-btn--lg { padding: 0.7rem 1.2rem; font-size: var(--kg-font-size-base); }
+.kg-btn--block { width: 100%; }
+
+.kg-btn-group { display: inline-flex; gap: var(--kg-space-2); flex-wrap: wrap; }
+
+/* --- Card ------------------------------------------------------------- */
+.kg-card {
+  background: var(--kg-surface);
+  border: 1px solid var(--kg-border);
+  border-radius: var(--kg-radius-lg);
+  box-shadow: var(--kg-shadow-sm);
+  padding: var(--kg-space-4);
+  transition: box-shadow var(--kg-transition), border-color var(--kg-transition);
+}
+.kg-card--interactive { cursor: pointer; }
+.kg-card--interactive:hover {
+  box-shadow: var(--kg-shadow-md);
+  border-color: var(--kg-border-strong);
+}
+.kg-card--flat { box-shadow: none; }
+.kg-card--lg { padding: var(--kg-space-5); }
+
+.kg-card__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--kg-space-3);
+  margin-bottom: var(--kg-space-3);
+}
+.kg-card__title { font-size: var(--kg-font-size-lg); font-weight: var(--kg-font-weight-semibold); }
+.kg-card__subtitle { color: var(--kg-muted); font-size: var(--kg-font-size-sm); margin: 0; }
+.kg-card__footer {
+  margin-top: var(--kg-space-3);
+  padding-top: var(--kg-space-3);
+  border-top: 1px solid var(--kg-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--kg-space-3);
+  flex-wrap: wrap;
+}
+
+/* --- Badge / StatusPill ---------------------------------------------- */
+.kg-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--kg-space-1);
+  padding: 0.15rem 0.55rem;
+  border-radius: var(--kg-radius-pill);
+  font-size: var(--kg-font-size-xs);
+  font-weight: var(--kg-font-weight-medium);
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+.kg-badge--neutral { background: var(--kg-surface-alt); color: var(--kg-text-soft); border-color: var(--kg-border); }
+.kg-badge--primary { background: var(--kg-primary-soft); color: var(--kg-primary); }
+.kg-badge--success { background: var(--kg-success-soft); color: var(--kg-success); }
+.kg-badge--warning { background: var(--kg-warning-soft); color: var(--kg-warning); }
+.kg-badge--danger { background: var(--kg-danger-soft); color: var(--kg-danger); }
+.kg-badge--info { background: var(--kg-info-soft); color: var(--kg-info); }
+
+.kg-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.kg-dot--pulse { animation: kg-pulse 1.4s ease-in-out infinite; }
+@keyframes kg-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+/* --- Tabs ------------------------------------------------------------ */
+.kg-tabs {
+  display: flex;
+  gap: var(--kg-space-1);
+  border-bottom: 1px solid var(--kg-border);
+  overflow-x: auto;
+}
+.kg-tab {
+  padding: 0.5rem 0.8rem;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--kg-muted);
+  font-family: inherit;
+  font-size: var(--kg-font-size-sm);
+  font-weight: var(--kg-font-weight-medium);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.kg-tab:hover { color: var(--kg-text); }
+.kg-tab--active { color: var(--kg-primary); border-bottom-color: var(--kg-primary); }

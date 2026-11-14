@@ -1,0 +1,11 @@
+/* Quiz page — answer highlighting (tokens only). */
+
+.kg-answer-right {
+  color: var(--kg-success);
+  font-weight: var(--kg-font-weight-semibold);
+}
+
+.kg-answer-wrong {
+  color: var(--kg-danger);
+  text-decoration: line-through;
+}

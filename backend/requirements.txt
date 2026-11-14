@@ -1,0 +1,38 @@
+# KnowGraph AI — backend dependencies (all local, no online AI APIs)
+#
+# Installed and verified on Python 3.14 (macOS arm64).
+# Everything below runs on CPU only and never calls a hosted LLM service.
+
+# --- Web layer -------------------------------------------------------------
+Flask==3.1.3
+flask-cors==6.0.5
+
+# --- Database (metadata only; files live on disk) --------------------------
+pymongo==4.18.1
+
+# --- Security --------------------------------------------------------------
+PyJWT==2.10.1
+bcrypt==5.0.0
+
+# --- Configuration ---------------------------------------------------------
+python-dotenv==1.2.3
+
+# --- Document reading ------------------------------------------------------
+# PyMuPDF does BOTH digital text extraction and page rasterisation,
+# so no external Poppler binary is required for scanned-PDF OCR.
+PyMuPDF==1.28.2
+python-docx==1.2.0
+Pillow==12.3.0
+
+# --- OCR (Tesseract is a local binary; pytesseract is only the wrapper) ----
+pytesseract==0.3.13
+
+# --- Embeddings / vectors --------------------------------------------------
+numpy==2.5.3
+chromadb==1.5.9
+
+# --- Local LLM transport (plain HTTP to Ollama on localhost) ---------------
+requests==2.34.2
+
+# --- Testing ---------------------------------------------------------------
+pytest==8.4.2

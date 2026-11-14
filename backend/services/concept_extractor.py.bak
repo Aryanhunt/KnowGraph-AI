@@ -1,0 +1,1116 @@
+"""
+Deterministic concept extraction for the knowledge graph (brief §9).
+
+The brief explicitly says *not* to rely entirely on the LLM for the graph. This
+module does the heavy lifting with classical techniques:
+
+1. **Candidate generation** — capitalised phrases ("Functional Dependency"),
+   acronyms ("BCNF", "TCP"), and frequent multi-word terms built from *consecutive*
+   words of the text (stopwords included, so a phrase can never be assembled from
+   words that were not actually adjacent).
+2. **Scoring** — a TF-IDF-flavoured score: term frequency damped by document
+   length, boosted for acronyms/definitions and for phrases that repeat. This is a
+   *lexical* score, and the UI presents it as "importance in the text", never as an
+   "AI confidence".
+3. **Quality gates** — the score alone is not enough to become a node. Running
+   headers/footers are removed, case variants are merged ("hill climbing" and
+   "Hill Climbing" are one concept, not two), shouted ordinary words are rejected
+   ("TOP", "HALF", "GREEDY", "THE" are typography, not acronyms), a capitalised
+   phrase must also appear in running text, and fragments contained in a longer
+   phrase are dropped ("third normal" → "third normal form").
+4. **Definition detection** — a sentence containing "X is/are/means ..." is stored
+   as the concept definition, which gives the graph node real content.
+5. **Cue-phrase relations** — phrases such as "requires", "builds on", "is a type
+   of" produce typed edges (``requires``, ``prerequisite_of``, ``part_of``, ...).
+
+Everything here is pure Python: no model download, no network, fully explainable.
+"""
+
+from __future__ import annotations
+
+import re
+from collections import Counter, defaultdict
+from dataclasses import dataclass, field
+from typing import Any, Dict, Iterable, Iterator, List, Optional, Sequence, Tuple
+
+from utils.text import (
+    STOPWORDS,
+    clean_concept_label,
+    normalize_for_match,
+    normalize_whitespace,
+    raw_words,
+    reflow_lines,
+    slugify,
+    split_sentences,
+)
+# ---------------------------------------------------------------------------
+# Patterns
+# ---------------------------------------------------------------------------
+# Capitalised multi-word phrase: "Functional Dependency", "Normal Forms".
+# The lookarounds stop a match from starting or ending *inside* a hyphenated compound:
+# "Random-Restart Hill Climbing" must yield "Hill Climbing", never "Restart Hill Climbing".
+_CAPITAL_PHRASE = re.compile(
+    r"(?<![A-Za-z\-])(?:[A-Z][a-z]{1,}\s+){1,3}[A-Z][a-z]{1,}(?![A-Za-z\-])"
+)
+# Acronym: BCNF, TCP, DBMS, 3NF (starts with a digit).
+_ACRONYM = re.compile(r"\b(?:[A-Z]{2,6}|\d[A-Z]{1,4})\b")
+# Sentence patterns that usually define a term.
+_DEFINITION_PATTERNS = (
+    re.compile(r"^(?P<term>[\w\s\-]{3,60}?)\s+(?:is|are)\s+(?:a|an|the)?\s*(?P<body>.{20,300})$",
+               re.IGNORECASE),
+    re.compile(r"^(?P<term>[\w\s\-]{3,60}?)\s+means\s+(?P<body>.{15,300})$", re.IGNORECASE),
+    re.compile(r"^(?P<term>[\w\s\-]{3,60}?)\s+refers to\s+(?P<body>.{15,300})$", re.IGNORECASE),
+)
+# A definition often sits mid-sentence ("Unlike search, Hill Climbing is ..."), so the
+# verb is also searched for anywhere; the words just before it must be the label.
+_MEDIAL_DEFINITION = re.compile(
+    r"\b(?:is|are|means|refers to|is defined as|is known as)\b", re.IGNORECASE
+)
+# Sentence length (in words) above which a line counts as *running text* rather than
+# a heading, a table row or a footer.
+_PROSE_WORDS = 6
+# Word-shaped tokens, used to spot a word the document also writes in normal case.
+_WORD_RE = re.compile(r"[A-Za-z][A-Za-z\-']{1,}")
+# Lines that make a capitalised phrase a heading rather than a concept.
+_NOISE_WORDS = {
+    "page", "chapter", "figure", "table", "unit", "module", "contents", "index",
+    "references", "abstract", "introduction", "conclusion", "example", "answer",
+    "question", "exercise", "note", "notes", "summary", "objective", "objectives",
+    "lecture", "assignment", "week", "date", "marks", "total",
+}
+
+# All-caps words that are ordinary English words, not acronyms. Slides and OCR shout
+# table headers and emphasis ("TOP HALF Speed Completeness Memory", "GREEDY"), and the
+# acronym pattern would otherwise publish "TOP", "HALF", "THE" as concepts. Deliberately
+# excludes words that can legitimately *be* acronyms in a technical document
+# (KEY, SET, MAP, TYPE, TIME, DATA, CODE, NODE, PATH, ...): those are only rejected when
+# the document also writes them in normal case, which is checked separately.
+_SHOUTED_ORDINARY = frozenset(
+    """
+    the and for with not you are but any out use new how why who its has was were will
+    top bottom left right middle centre center half full upper lower inner outer front
+    back next previous first second third fourth fifth last more most less least
+    high low big small long short fast slow good bad best worst greedy
+    old real true false yes plus minus
+    also only even very just still yet never always often sometimes
+    here there then now than that this these those they them their our your my we us he she it
+    do does did done be been being am is are have had because since until
+    about across against between through during without within along around above below
+
+
+# Cue phrases → relation type. Ordered from most specific to most generic.
+_CUE_PATTERNS: Tuple[Tuple[re.Pattern, str, bool], ...] = (
+    (re.compile(r"\bbuilt on\b|\bbuilds on\b|\bbased on\b|\bextends\b|\bprerequisite\b|\bbefore\s+\w+ing\b",
+                re.IGNORECASE), "prerequisite_of", True),
+    (re.compile(r"\brequires?\b|\bneeds\b", re.IGNORECASE), "requires", False),
+    (re.compile(r"\bdepends on\b|\bdependent on\b|\brelies on\b", re.IGNORECASE), "depends_on", False),
+    (re.compile(r"\bcauses?\b|\bleads to\b|\bresults in\b|\bproduces\b", re.IGNORECASE), "causes", False),
+    # Structural containment verbs ("soft computing includes X").
+    (re.compile(r"\bincludes?\b|\bincluding\b|\bcontains?\b|\bcontaining\b|\bcomprises?\b|\bconsists of\b"
+                r"|\bcomposed of\b|\bmade up of\b|\bincorporates?\b", re.IGNORECASE), "contains", False),
+    (re.compile(r"\bcomponents of\b|\bcomponent of\b|\bparts of\b|\belements of\b", re.IGNORECASE),
+     "component_of", True),
+    (re.compile(r"\btypes of\b|\btype of\b|\bkinds of\b|\bkind of\b|\bcategories of\b|\bcategory of\b|\bforms of\b",
+                re.IGNORECASE), "type_of", False),
+    (re.compile(r"\bapplications of\b|\bapplication of\b|\bapplied to\b|\bused in\b", re.IGNORECASE),
+     "application_of", False),
+    (re.compile(r"\bdefines?\b|\bdefined as\b|\brefers to\b|\bmeans\b", re.IGNORECASE), "defines", False),
+    (re.compile(r"\bis\s+(?:a\s+)?(?:type|kind|form|subset|special case)\s+of\b|\bis\s+part\s+of\b",
+                re.IGNORECASE), "part_of", False),
+    (re.compile(r"\bis\s+an?\s+(?:\w+\s+){0,2}(?:algorithm|method|technique|approach|model|protocol|structure)\b",
+                re.IGNORECASE), "is_a", False),
+    (re.compile(r"\bis an example of\b|\bfor example\b|\be\.g\.\b|\bsuch as\b", re.IGNORECASE),
+     "example_of", False),
+    (re.compile(r"\bused for\b|\bused to\b|\benables\b|\ballows\b", re.IGNORECASE), "used_for", False),
+    (re.compile(r"\buses the\b\s*(?:\w+\s+){0,2}relation\b|\buses\b.{0,40}\brelation\b", re.IGNORECASE),
+     "uses_relation", False),
+    (re.compile(r"\bdiffers from\b|\bdifferent from\b|\bin contrast\b|\bunlike\b|\bwhereas\b|\bcompared to\b",
+                re.IGNORECASE), "contrasts_with", False),
+    (re.compile(r"\bexplains\b|\bexplained by\b|\bdetermines\b", re.IGNORECASE),
+     "explains", False),
+)
+
+
+@dataclass
+class ConceptCandidate:
+    """A concept found in a document, with the evidence needed for the graph."""
+
+    label: str
+    slug: str
+    score: float = 0.0
+    occurrences: int = 0
+    pages: List[int] = field(default_factory=list)
+    snippets: List[str] = field(default_factory=list)
+    definition: str = ""
+    kind: str = "phrase"          # phrase | acronym | term
+
+    def to_dict(self) -> Dict[str, object]:
+        return {
+            "label": self.label,
+            "slug": self.slug,
+            "score": round(self.score, 4),
+            "occurrences": self.occurrences,
+            "pages": self.pages,
+            "definition": self.definition,
+            "kind": self.kind,
+        }
+
+
+@dataclass
+class RelationCandidate:
+    """A typed relationship between two concept labels."""
+
+    source: str
+    target: str
+    relation: str
+    method: str = "cooccurrence"
+    weight: float = 1.0
+    page_number: Optional[int] = None
+    snippet: str = ""
+    chunk_id: str = ""
+    evidence_count: int = 1
+    confidence: Optional[float] = None
+    verification_status: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, object]:
+        return {
+            "source": self.source,
+            "target": self.target,
+            "relation": self.relation,
+            "method": self.method,
+            "weight": round(self.weight, 3),
+            "page_number": self.page_number,
+            "snippet": self.snippet,
+            "chunk_id": self.chunk_id,
+            "evidence_count": self.evidence_count,
+            "confidence": self.confidence,
+            "verification_status": self.verification_status,
+        }
+
+    def evidence_payload(self) -> Dict[str, Any]:
+        """Shape written into the relation document's evidence array."""
+        from models.graph import default_relation_confidence, verification_for_method
+
+        confidence = (
+            self.confidence
+            if self.confidence is not None
+            else default_relation_confidence(
+                self.method, [{"snippet": self.snippet}] if self.snippet else []
+            )
+        )
+        return {
+            "page_number": self.page_number,
+            "snippet": self.snippet,
+            "chunk_id": self.chunk_id,
+            "method": self.method,
+            "confidence": round(float(confidence), 2),
+            "verification_status": (
+                self.verification_status or verification_for_method(self.method)
+            ),
+            "evidence_count": max(1, int(self.evidence_count)),
+        }
+
+
+# Structural headings: "Components of X" -> component_of (X contains each listed concept).
+_SECTION_HEADER_PATTERNS: Tuple[Tuple[re.Pattern, str], ...] = (
+    (re.compile(r"^components?\s+of\s+(?P<parent>.{2,80})$", re.IGNORECASE), "component_of"),
+    (re.compile(r"^types?\s+of\s+(?P<parent>.{2,80})$", re.IGNORECASE), "type_of"),
+    (re.compile(r"^applications?\s+of\s+(?P<parent>.{2,80})$", re.IGNORECASE), "application_of"),
+    (re.compile(r"^parts?\s+of\s+(?P<parent>.{2,80})$", re.IGNORECASE), "component_of"),
+)
+
+_LIST_ITEM = re.compile(r"^\s*(?:[-•*▪◦►–—]|\d{1,3}[.)\-:]|[a-zA-Z][.)])\s+(?P<body>.{2,300})$")
+
+_KNOWN_ALL_CAPS_HEADINGS = frozenset()
+
+#: Sentence splitter shared with text helpers — long lines are prose.
+_END_OF_SENTENCE = re.compile(r"[.!?]\s*$")
+
+
+def split_into_sections(
+    pages: Sequence[Tuple[int, str]],
+) -> List[Dict[str, Any]]:
+    """
+    Rebuild *section context* from pages: short lines become headings for the
+    paragraphs/lists that follow them; numbering/bullets mark list items.
+    Returns dicts with page_number, heading, text, kind ("heading" not stored).
+    """
+    sections: List[Dict[str, Any]] = []
+    pending_heading = ""
+
+    for page_number, raw_text in pages:
+        for line in (raw_text or "").split("\n"):
+            text = line.strip()
+            if not text:
+                continue
+            list_match = _LIST_ITEM.match(text)
+            if list_match:
+                sections.append({
+                    "page_number": page_number,
+                    "heading": pending_heading,
+                    "text": list_match.group("body").strip(),
+                    "kind": "list",
+                })
+                continue
+            words = raw_words(text)
+            if (
+                len(words) <= 12
+                and not re.search(r"[.!?]\s+[A-Z0-9\"'(\[]", text)
+                and not _END_OF_SENTENCE.search(text)
+            ):
+                pending_heading = text
+                continue
+            sections.append({
+                "page_number": page_number,
+                "heading": pending_heading,
+                "text": text,
+                "kind": "paragraph",
+            })
+    return sections
+
+
+# ---------------------------------------------------------------------------
+# Text preparation
+# ---------------------------------------------------------------------------
+def _line_key(line: str) -> str:
+    """Line form for repeat detection; case/punctuation-insensitive."""
+    return re.sub(r"[^a-z0-9]+", " ", (line or "").lower()).strip()
+
+
+def _strip_leading_articles(text: str) -> str:
+    lowered = (text or "").strip().lower()
+    for article in ("the ", "a ", "an "):
+        if lowered.startswith(article) and len(text) > len(article) + 2:
+            return text[len(article):].strip()
+    return (text or "").strip()
+
+
+def _member_hits(tail: str, by_label: Dict[str, ConceptCandidate]) -> List[ConceptCandidate]:
+    """Concepts mentioned in a list tail — longest label match wins per span."""
+    lowered = (tail or "").lower()
+    hits: List[ConceptCandidate] = []
+    seen_spans: List[Tuple[int, int]] = []
+
+    def overlaps(start: int, end: int) -> bool:
+        return any(start < stop and end > begin for begin, stop in seen_spans)
+
+    ordered = sorted(by_label.values(), key=lambda c: len(c.label), reverse=True)
+    for candidate in ordered:
+        name = candidate.label.lower()
+        if len(name) < 3:
+            continue
+        start = lowered.find(name)
+        if start == -1:
+            continue
+        before = lowered[start - 1] if start > 0 else " "
+        after = lowered[start + len(name)] if start + len(name) < len(lowered) else " "
+        if before.isalnum() or after.isalnum():
+            continue
+        if overlaps(start, start + len(name)):
+            continue
+        seen_spans.append((start, start + len(name)))
+        hits.append(candidate)
+    return hits
+
+
+def _resolve_parent(heading: str, by_label: Dict[str, ConceptCandidate]) -> Optional[ConceptCandidate]:
+    direct = by_label.get(normalize_for_match(heading.strip(" -–—:;")))
+    if direct:
+        return direct
+    for pattern, _ in _SECTION_HEADER_PATTERNS:
+        match = pattern.match(heading.strip())
+        if match:
+            holder = by_label.get(normalize_for_match(match.group("parent")))
+            if holder:
+                return holder
+    candidate = _strip_leading_articles(heading)
+    return by_label.get(normalize_for_match(candidate.strip(" -–—:;")))
+
+
+def _header_relation(heading: str) -> str:
+    for pattern, rel_type in _SECTION_HEADER_PATTERNS:
+        if pattern.match(heading.strip()):
+            return rel_type
+    lowered_head = normalize_whitespace(heading.lower())
+    if re.search(r"\btypes?|kinds?|categories?|forms?\b", lowered_head):
+        return "type_of"
+    if re.search(r"\bapplications?\b", lowered_head):
+        return "application_of"
+    return "component_of"
+
+
+_PARENT_USES = re.compile(
+    r"^(?P<parent>.{2,80}?)\s+uses?\s+(?P<tail>.{2,400})$", re.IGNORECASE)
+
+
+def _parent_uses_pattern(text: str) -> Optional[Tuple[str, str, str]]:
+    """'<Parent> uses <members>' fan-out inside one short sentence."""
+    if len(raw_words(text)) > 40:
+        return None
+    match = _PARENT_USES.match(text.strip())
+    if not match:
+        return None
+    parent = match.group("parent").strip()
+    tail = match.group("tail").strip()
+    if re.search(r"\brelation\b", tail, re.IGNORECASE):
+        return (parent, "uses_relation", tail)
+    return None
+
+
+def extract_structural_relations(
+    sections: Sequence[Dict[str, Any]],
+    concepts: Sequence[ConceptCandidate],
+    *,
+    max_relations_per_parent: int = 12,
+) -> List[RelationCandidate]:
+    """
+    Infer containment relations from document structure:
+
+    * ``<heading>: <ConceptA>, <ConceptB>`` inline fan-out ("Types of X: A, B"),
+    * a structural header ("Components of X") followed by concept-only lines,
+    * a heading line itself naming the parent with concept-only lines after it,
+    * a short sentence "<Parent> uses <A>, <B> relations" fan-out.
+
+    Every result carries heading + line text as evidence (``method =
+    structural``) — invented members are impossible because a line links only
+    when it names exactly an extracted concept.
+    """
+    by_label = {normalize_for_match(c.label): c for c in concepts}
+    produced: Dict[Tuple[str, str, str], RelationCandidate] = {}
+
+    def emit(parent_label: str, parent_slug: str, child: ConceptCandidate,
+             relation: str, evidence: str, page_number: Optional[int],
+             heading: str = "") -> None:
+        key = (parent_slug, child.slug, relation)
+        if key in produced or parent_slug == child.slug:
+            return
+        snippet = (heading + ": " + evidence).strip(": ")[:280] if heading else evidence[:280]
+        produced[key] = RelationCandidate(
+            source=parent_label,
+            target=child.label,
+            relation=relation,
+            method="structural",
+            weight=1.2,
+            page_number=page_number,
+            snippet=snippet,
+        )
+
+    for section in sections:
+        kind = section.get("kind", "paragraph")
+        heading = (section.get("heading") or "").strip()
+        text = (section.get("text") or "").strip()
+        page_number = section.get("page_number")
+        if not text:
+            continue
+
+        # 1. Inline fan-out: "<head phrase>: A, B, C" -------------------------
+        if ":" in text:
+            head, _, tail = text.partition(":")
+            parent_label = ""
+            relation: Optional[str] = None
+            for pattern, rel_type in _SECTION_HEADER_PATTERNS:
+                match = pattern.match(head.strip())
+                if match:
+                    parent_label = match.group("parent").strip()
+                    relation = rel_type
+                    break
+            if not relation:
+                lowered_head = normalize_whitespace(head.strip().lower())
+                if re.search(r"\b(components?|parts?|elements?)\b", lowered_head):
+                    relation, parent_label = "component_of", _strip_leading_articles(head)
+                elif re.search(r"\btypes?|kinds?|categories?|forms?\b", lowered_head):
+                    relation, parent_label = "type_of", _strip_leading_articles(head)
+                elif re.search(r"\bapplications?\b", lowered_head):
+                    relation, parent_label = "application_of", _strip_leading_articles(head)
+            if relation and parent_label and tail.strip():
+                parent = by_label.get(normalize_for_match(parent_label.strip(" -–—:;")))
+                if parent:
+                    children = _member_hits(tail, by_label)
+                    for child in children[:max_relations_per_parent]:
+                        if child.slug != parent.slug:
+                            emit(parent.label, parent.slug, child, relation,
+                                 tail.strip(), page_number, head.strip())
+                    continue
+
+        # 2. List item naming exactly one concept under a structural header ----
+        if kind == "list":
+            members = _member_hits(text, by_label)
+            if heading and len(members) == 1:
+                parent = _resolve_parent(heading, by_label)
+                if parent and members[0].slug != parent.slug:
+                    emit(parent.label, parent.slug, members[0],
+                         _header_relation(heading), text, page_number, heading)
+                continue
+            # 3. "<Parent> uses <A>, <B> relations" fan-out -------------------
+            sentence = _parent_uses_pattern(text)
+            if sentence:
+                parent_name, rel_type, tail = sentence
+                holder = by_label.get(normalize_for_match(parent_name))
+                if holder:
+                    kids = _member_hits(tail, by_label)[:max_relations_per_parent]
+                    for child in kids:
+                        if child.slug != holder.slug:
+                            emit(holder.label, holder.slug, child,
+                                 rel_type, text, page_number)
+    return sorted(produced.values(), key=lambda item: item.weight, reverse=True)
+
+
+def _edge_lines(text: str, count: int) -> List[str]:
+    lines = [line.strip() for line in (text or "").split("\n") if line.strip()]
+    return lines[:count] + lines[-count:]
+
+
+def strip_running_boilerplate(
+    pages: Sequence[Tuple[int, str]],
+    *,
+    edge_lines: int = 2,
+    min_pages: int = 3,
+    ratio: float = 0.6,
+) -> List[Tuple[int, str]]:
+    """
+    Remove running headers/footers that repeat at the top or bottom of most pages.
+
+    A PDF exported from a note-taking tool stamps the same footer on every page
+    ("Gemini Notebook"), and that stamp was previously the *highest scoring
+    "concept"* in the document. Only the first/last few lines of a page are
+    considered, so a phrase that legitimately repeats in the body is untouched.
+    """
+    if len(pages) < min_pages:
+        return list(pages)
+
+    counts: Counter = Counter()
+    for _page_number, text in pages:
+        for line in _edge_lines(text, edge_lines):
+            counts[_line_key(line)] += 1
+
+    threshold = max(min_pages, int(len(pages) * ratio + 0.5))
+    boilerplate = {key for key, count in counts.items() if key and count >= threshold}
+    if not boilerplate:
+        return list(pages)
+
+    cleaned: List[Tuple[int, str]] = []
+    for page_number, text in pages:
+        kept = [line for line in (text or "").split("\n") if _line_key(line) not in boilerplate]
+        cleaned.append((page_number, "\n".join(kept)))
+    return cleaned
+
+
+def prepare_graph_pages(pages: Sequence[Tuple[int, str]]) -> List[Tuple[int, str]]:
+    """
+    Normalise page text before graph extraction.
+
+    Two fixes that both come from real PDF/slide exports: repeated running
+    headers/footers are dropped (:func:`strip_running_boilerplate`), and hard-wrapped
+    lines are reflowed so a definition or cue phrase split across two lines is seen
+    as one sentence. Idempotent, so it is safe to call from more than one entry point.
+    """
+    cleaned = strip_running_boilerplate(pages)
+    return [(number, reflow_lines(text)) for number, text in cleaned]
+
+
+def _page_sentences(text: str) -> Iterator[str]:
+    """
+    Sentence-like units of a page: lines first, then sentences within each line.
+
+    Lines come first because a slide/page is titled *and* written: without this, a
+    heading and the paragraph under it end up in one "sentence", which made a
+    five-word slide title look like running text.
+    """
+    for line in (text or "").split("\n"):
+        for sentence in split_sentences(line):
+            yield sentence
+
+
+def _prose_blob(pages: Sequence[Tuple[int, str]]) -> str:
+    """
+    Lowercased running text: sentences long enough to be prose, not headings.
+
+    Used as the "does this term actually appear in the text?" test without running a
+    regex per candidate.
+    """
+    chunks: List[str] = []
+    for _page_number, text in pages:
+        for sentence in _page_sentences(text):
+            if len(sentence.split()) >= _PROSE_WORDS:
+                chunks.append(sentence.lower())
+    return " \n ".join(chunks)
+
+
+def _non_shouted_words(text: str) -> Counter:
+    """
+    Words the document also writes in normal case, with how often each occurs.
+
+    If "greedy" appears anywhere lower/TITLE-CASED, then "GREEDY" is emphasis and not
+    an acronym — a cheap, document-local substitute for a dictionary. Hyphenated words
+    are split as well, so "state-space" vouches for "SPACE". A count (not just a
+    set membership flag) is kept so a single stray mixed-case sighting of a *short*
+    token ("Ai" instead of "AI", a one-off typo or OCR slip) doesn't get the same
+    veto power as a word the document consistently writes in normal case.
+    """
+    counts: Counter = Counter()
+    for match in _WORD_RE.finditer(text or ""):
+        word = match.group(0)
+        if word.isupper():
+            continue
+        counts[word.lower()] += 1
+        for part in re.split(r"[-']", word):
+            if part:
+                counts[part.lower()] += 1
+    return counts
+
+
+def _is_shouted_word(label: str, ordinary_case_counts: Counter) -> bool:
+    """True when an ALL-CAPS token is a shouted ordinary word rather than an acronym."""
+    lowered = label.lower()
+    if lowered in _SHOUTED_ORDINARY:
+        return True
+    # A short (<=3 char) acronym needs *repeated* normal-case sightings to be
+    # disqualified — a lone "Ai" among hundreds of "AI"s is a typo, not evidence the
+    # document treats it as an ordinary word. Longer tokens keep the original,
+    # stricter one-sighting-is-enough rule.
+    return ordinary_case_counts.get(lowered, 0) >= min_repeat
+
+
+# ---------------------------------------------------------------------------
+# Candidate generation
+# ---------------------------------------------------------------------------
+def _is_noise(label: str, *, kind: str = "term") -> bool:
+    words = [word.lower() for word in re.findall(r"[A-Za-z]+", label)]
+    if not words:
+        return True
+    if words[0] in _NOISE_WORDS:
+        return True
+    # Acronyms are already shape-validated by _ACRONYM ([A-Z]{2,6} or \d[A-Z]{1,4}),
+    # so a 2-letter acronym (AI, ML, OS, UI, DB, VR, AR, IT, PC, ...) is real signal,
+    # not junk. Phrases/terms keep the 3-char floor to reject stray fragments.
+    min_length = 2 if kind == "acronym" else 3
+    if len(label) < min_length or len(label) > 70:
+        return True
+    return bool(re.search(r"[.!?]$", label.strip()))
+
+
+def _heading_blob(pages: Sequence[Tuple[int, str]]) -> str:
+    """
+    Normalised text of every short, heading-shaped line, joined into one blob for
+    cheap substring checks.
+
+    A term that names the document's own title or a section heading ("INTRODUCTION
+    TO ARTIFICIAL INTELLIGENCE") is the strongest available signal that it is the
+    *main* concept — independent of body frequency. Without this, a broad topic term
+    that is genuinely the subject of a long, multi-section document can still lose
+    out to a narrower term that happens to repeat more densely in one section (e.g.
+    "Expert System" out-scoring "Artificial Intelligence" in a full-syllabus PDF).
+    """
+    lines: List[str] = []
+    for _page_number, text in pages:
+        for line in (text or "").split("\n"):
+            stripped = line.strip()
+            if not stripped:
+                continue
+            words = raw_words(stripped)
+            if len(words) <= 12 and not _END_OF_SENTENCE.search(stripped):
+                lines.append(normalize_for_match(stripped))
+    return "\n".join(lines)
+
+
+def collect_candidates(
+    pages: Sequence[Tuple[int, str]],
+    *,
+    max_concepts: int = 60,
+    min_score: float = 0.08,
+) -> List[ConceptCandidate]:
+    """
+    Find and score concept candidates across a document.
+
+    ``pages`` is a sequence of ``(page_number, text)`` pairs, so every concept can
+    point back to the page it was seen on. The text is normalised first (running
+    headers/footers removed, hard-wrapped lines reflowed) — see
+    :func:`prepare_graph_pages`.
+    """
+    pages = prepare_graph_pages(pages)
+
+    counts: Counter = Counter()
+    kinds: Dict[str, str] = {}
+    pages_for: Dict[str, set] = defaultdict(set)
+    total_tokens = 0
+
+    # Words the document also writes in normal case, collected up front so the answer
+    # does not depend on page order.
+    ordinary_case_words: Counter = Counter()
+    for _page_number, text in pages:
+        ordinary_case_words += _non_shouted_words(text)
+
+    for page_number, text in pages:
+        if not text:
+            continue
+        body = normalize_whitespace(text)
+        total_tokens += max(1, len(body.split()))
+
+        for match in _ACRONYM.finditer(body):
+            label = match.group(0).strip()
+            if _is_noise(label, kind="acronym") or _is_shouted_word(label, ordinary_case_words):
+                continue
+            counts[label] += 1
+            kinds.setdefault(label, "acronym")
+            pages_for[label].add(page_number)
+
+        for match in _CAPITAL_PHRASE.finditer(body):
+            label = clean_concept_label(match.group(0))
+            if _is_noise(label):
+                continue
+            counts[label] += 1
+            kinds.setdefault(label, "phrase")
+            pages_for[label].add(page_number)
+
+        # Frequent multi-word terms. Windows slide over *consecutive* words, stopwords
+        # included, so a phrase can never be assembled from words that were not
+        # adjacent in the text: filtering stopwords first is what turned a table of
+        # "Job A Job B / Job E Job F" labels into the concept "job job".
+        words = raw_words(body)
+        for start in range(len(words) - 1):
+            for size in (2, 3):
+                window = words[start : start + size]
+                if len(window) < size:
+                    continue
+                if any(token in STOPWORDS or len(token) < 3 for token in window):
+                    continue
+                if len(set(window)) < size:
+                    continue  # "job job" is not a concept
+                phrase = " ".join(window)
+                counts[phrase] += 1
+                kinds.setdefault(phrase, "term")
+                pages_for[phrase].add(page_number)
+
+    counts, kinds, pages_for, forms = _merge_case_variants(counts, kinds, pages_for)
+    counts, kinds, pages_for = _merge_acronym_phrase_variants(counts, kinds, pages_for)
+    prose = _prose_blob(pages)
+    headings = _heading_blob(pages)
+
+    minimum_occurrences = 2
+    candidates: List[ConceptCandidate] = []
+    for label, count in counts.items():
+        kind = kinds.get(label, "term")
+        # Acronyms are meaningful even with a low count; phrases must repeat.
+        if kind != "acronym" and count < minimum_occurrences:
+            continue
+
+        frequency = count / max(1, total_tokens / 1000)
+        boost = {"acronym": 1.4, "phrase": 1.15, "term": 1.0}[kind]
+        length_penalty = 1.0 if len(label.split()) == 1 else 1.0 / (len(label.split()) ** 0.35)
+        heading_bonus = 1.6 if normalize_for_match(label) in headings else 1.0
+        score = round(frequency * boost * length_penalty * heading_bonus / 10, 4)
+
+        candidates.append(
+            ConceptCandidate(
+                label=label,
+                slug=slugify(label),
+                score=score,
+                occurrences=count,
+                pages=sorted(pages_for[label]),
+                kind=kind,
+            )
+        )
+
+    candidates.sort(key=lambda item: (item.score, item.occurrences), reverse=True)
+    passing = [
+        item
+        for item in candidates
+        if item.score >= min_score
+        and _is_concept_like(item, forms.get(item.label, []), prose, pages)
+    ]
+    filtered = _prune_subsumed(passing)[:max_concepts]
+
+    for candidate in filtered:
+        candidate.definition, snippet = find_definition(pages, candidate.label)
+        candidate.snippets = [snippet] if snippet else []
+    return filtered
+
+
+# Ranked preference between the passes that can find the same concept.
+_KIND_RANK = {"acronym": 3, "phrase": 2, "term": 1}
+
+
+def _case_quality(label: str) -> int:
+    """1 when a label keeps real capitalisation, 0 when it is all lowercase."""
+    return 1 if any(char.isupper() for char in label) else 0
+
+
+def _merge_case_variants(
+    counts: Counter,
+    kinds: Dict[str, str],
+    pages_for: Dict[str, set],
+) -> Tuple[Counter, Dict[str, str], Dict[str, set], Dict[str, List[str]]]:
+    """
+    Collapse case variants of one concept into a single candidate.
+
+    The n-gram pass works in lowercase while the phrase pass keeps the original
+    casing, so "hill climbing" and "Hill Climbing" were published as two separate
+    nodes — the same concept twice in the graph. The best-cased, strongest form
+    wins, pages are unioned, and the occurrence count is the **largest** of the
+    variants (they describe the same occurrences, so summing would inflate it).
+    """
+    grouped: Dict[str, List[str]] = defaultdict(list)
+    for label in counts:
+        grouped[normalize_for_match(label)].append(label)
+
+    merged_counts: Counter = Counter()
+    merged_kinds: Dict[str, str] = {}
+    merged_pages: Dict[str, set] = {}
+    forms: Dict[str, List[str]] = {}
+
+    for variants in grouped.values():
+        display = max(
+            variants,
+            key=lambda label: (_KIND_RANK.get(kinds.get(label, "term"), 1), _case_quality(label)),
+        )
+        merged_counts[display] = max(counts[label] for label in variants)
+        merged_kinds[display] = kinds.get(display, "term")
+        merged_pages[display] = set().union(*(pages_for[label] for label in variants))
+        forms[display] = list(variants)
+
+    return merged_counts, merged_kinds, merged_pages, forms
+
+
+def _initials(phrase: str) -> str:
+    """'Artificial Intelligence' -> 'AI'."""
+    return "".join(word[0].upper() for word in re.findall(r"[A-Za-z]+", phrase))
+
+
+def _merge_acronym_phrase_variants(
+    counts: Counter,
+    kinds: Dict[str, str],
+    pages_for: Dict[str, set],
+) -> Tuple[Counter, Dict[str, str], Dict[str, set]]:
+    """
+    Fold a short acronym into the multi-word phrase it stands for, when the phrase's
+    initials match the acronym exactly ("Artificial Intelligence" absorbs "AI").
+
+    Without this, notes that use both forms (very common — "AI" appears far more
+    often than the spelled-out phrase once it has been introduced) split one concept
+    into two half-strength candidates, and the real central concept never becomes the
+    graph's biggest hub. The longer phrase is kept as the canonical, readable label;
+    occurrences and pages of the acronym are folded in rather than summed against a
+    threshold, since they are genuinely separate mentions of the same concept.
+    """
+    phrase_by_initials: Dict[str, List[str]] = defaultdict(list)
+    for label, kind in kinds.items():
+        if kind == "phrase" and len(label.split()) >= 2:
+            phrase_by_initials[_initials(label)].append(label)
+
+    acronym_labels = [label for label, kind in kinds.items() if kind == "acronym"]
+    if not acronym_labels or not phrase_by_initials:
+        return counts, kinds, pages_for
+
+    merged_counts = Counter(counts)
+    merged_kinds = dict(kinds)
+    merged_pages = {label: set(members) for label, members in pages_for.items()}
+
+    for acronym_label in acronym_labels:
+        matches = phrase_by_initials.get(acronym_label.upper())
+        if not matches or acronym_label not in merged_counts:
+            continue
+        # Prefer the most frequent phrase form; the longest one breaks ties.
+        canonical = max(matches, key=lambda p: (merged_counts.get(p, 0), len(p)))
+        merged_counts[canonical] = merged_counts.get(canonical, 0) + merged_counts.pop(acronym_label)
+        merged_pages[canonical] = merged_pages.get(canonical, set()) | merged_pages.pop(acronym_label, set())
+        merged_kinds.pop(acronym_label, None)
+        merged_kinds[canonical] = "phrase"
+
+    return merged_counts, merged_kinds, merged_pages
+
+
+def _is_concept_like(
+    candidate: ConceptCandidate,
+    forms: Sequence[str],
+    prose: str,
+    pages: Sequence[Tuple[int, str]],
+) -> bool:
+    """
+    Final quality gate: the score is not enough, the *shape* has to be right.
+
+    * A **capitalised phrase** must also appear in running text. A slide title or a
+      page footer is typography, not a concept ("The Upgrade", "Gemini Notebook").
+      Three mentions are accepted even without prose, so a term that only shows up
+      in headings and diagrams is not lost.
+    * An **all-caps token** is checked against the document's own vocabulary while it
+      is collected (:func:`_is_shouted_word`); here a one-off fragment that never
+      appears in running text is dropped, while digit-bearing names (3NF) always pass.
+    """
+    if candidate.kind == "phrase":
+        if candidate.occurrences < 3 and _is_heading_label(candidate.label, pages):
+            return False
+        if candidate.occurrences >= 3:
+            return True
+        return any(form.lower() in prose for form in forms)
+    if candidate.kind == "acronym":
+        if any(char.isdigit() for char in candidate.label):
+            return True
+        return candidate.occurrences >= 2 or candidate.label.lower() in prose
+    return True
+
+
+def _word_bounded(label: str) -> re.Pattern:
+    return re.compile(r"(?<![A-Za-z])" + re.escape(label) + r"(?![A-Za-z])", re.IGNORECASE)
+
+
+def _is_heading_label(label: str, pages: Sequence[Tuple[int, str]]) -> bool:
+    """
+    True when *every* mention of the phrase is a label immediately followed by a colon.
+
+    "The Upgrade: Random-Restart Hill Climbing" is the *title of a section*, not a
+    concept the notes explain — the phrase is a caption for the line beneath it. Used
+    only for low-frequency phrases, so a term that is genuinely repeated (and may well
+    appear in headings too) is not thrown away. The word "upgrade" does occur in the
+    prose of these notes, which is why a plain "does this text appear?" test kept it.
+    """
+    pattern = _word_bounded(label)
+    seen = 0
+    for _page_number, text in pages:
+        for line in (text or "").split("\n"):
+            for match in pattern.finditer(line):
+                seen += 1
+                if line[match.end() :].lstrip()[:1] != ":":
+                    return False
+    return seen > 0
+
+
+def _prune_subsumed(candidates: Sequence[ConceptCandidate]) -> List[ConceptCandidate]:
+    """
+    Drop n-gram fragments contained in a longer, at-least-as-frequent phrase.
+
+    "third normal form" and its fragment "third normal" are the same concept, and
+    only the complete phrase should become a node. Comparing frequencies keeps a
+    genuinely common short phrase ("normal form", used everywhere) alive.
+    """
+    kept: List[ConceptCandidate] = []
+    for candidate in candidates:
+        if candidate.kind == "term" and any(
+            other is not candidate
+            and other.kind in ("term", "phrase")
+            and other.occurrences >= candidate.occurrences
+            and _word_bounded(candidate.label).search(other.label)
+            for other in candidates
+        ):
+            continue
+        kept.append(candidate)
+    return kept
+
+
+def _clean_sentence(sentence: str) -> str:
+    """Single-line, whitespace-normalised sentence (snippets are shown in the UI)."""
+    return normalize_whitespace(sentence or "").replace("\n", " ").strip()
+
+
+def _term_matches(term: str, target: str) -> bool:
+    """Does the words before the verb actually name the concept?"""
+    value = normalize_for_match(clean_concept_label(term))
+    if not value or not target:
+        return False
+    return value == target or value.endswith(" " + target) or target.endswith(" " + value)
+
+
+def _definition_sentence(unit: str, target: str) -> str:
+    """
+    The sentence itself when it defines ``target``, otherwise an empty string.
+
+    Two shapes are accepted: the term at the start of the sentence ("BCNF is a
+    normal form where ..."), and the term immediately before the verb anywhere in
+    the sentence ("Unless a superkey holds, BCNF is not satisfied"). The second
+    shape matters because explanation-heavy notes rarely start a sentence with the
+    term they are defining — the old code only ever tried the first shape.
+    """
+    for pattern in _DEFINITION_PATTERNS:
+        match = pattern.match(unit)
+        if match and _term_matches(match.group("term"), target) and len(match.group("body").strip()) >= 20:
+            return unit
+
+    for match in _MEDIAL_DEFINITION.finditer(unit):
+        head = unit[: match.start()].strip(" ,;:-–—")
+        body = unit[match.end() :].strip()
+        if len(body) < 20 or not head:
+            continue
+        words = head.split()
+        for size in range(min(4, len(words)), 0, -1):
+            if _term_matches(" ".join(words[-size:]), target):
+                return unit
+    return ""
+
+
+def _starts_with_term(sentence: str, target: str) -> bool:
+    """True when the definition opens with the concept — the strongest shape."""
+    return _term_matches(" ".join(sentence.split()[: min(4, len(target.split()) + 2)]), target)
+
+
+def _trim_heading_prefix(sentence: str, label: str) -> str:
+    """Drop a short slide/heading prefix ("The Advantage: ...") from a definition."""
+    head, separator, tail = sentence.partition(":")
+    if separator and len(head.split()) <= 5 and _word_bounded(label).search(tail):
+        return tail.strip()
+    return sentence
+
+
+def find_definition(pages: Sequence[Tuple[int, str]], label: str) -> Tuple[str, str]:
+    """
+    Look for a definition sentence for ``label``.
+
+    Returns ``(definition, snippet)`` — both empty when nothing is found, so the UI
+    shows no definition rather than inventing one (brief §14).
+
+    Every sentence that mentions the concept is examined, across every page: the
+    previous implementation returned after the *first* mention, so a concept whose
+    first appearance was a slide title ("Ascent: Hill Climbing") never got the
+    definition that appears two pages later.
+    """
+    target = normalize_for_match(label)
+    if not target:
+        return "", ""
+
+    pattern = _word_bounded(label)
+    fallback = ""
+    medial = ""
+
+    for _page_number, text in pages:
+        for sentence in _page_sentences(text):
+            cleaned = _clean_sentence(sentence)
+            if len(cleaned) < 25 or not pattern.search(cleaned):
+                continue
+            if not fallback:
+                fallback = cleaned[:280]
+            definition = _definition_sentence(cleaned, target)
+            if not definition:
+                continue
+            trimmed = _trim_heading_prefix(definition, label)
+            if _starts_with_term(trimmed, target):
+                return trimmed[:300], definition[:280]
+            medial = medial or trimmed
+
+    if medial:
+        return medial[:300], medial[:280]
+    return "", fallback
+
+
+# ---------------------------------------------------------------------------
+# Relations
+# ---------------------------------------------------------------------------
+def extract_relations(
+    pages: Sequence[Tuple[int, str]],
+    concepts: Sequence[ConceptCandidate],
+    *,
+    max_relations_per_concept: int = 8,
+    require_sentence_cooccurrence: bool = True,
+) -> List[RelationCandidate]:
+    """
+    Derive typed edges from the text.
+
+    Two sources of evidence:
+
+    * **cue phrases** — a sentence mentioning two concepts and containing a cue
+      phrase such as "requires" produces ``requires`` (``method = cue_phrase``),
+    * **co-occurrence** — two concepts appearing in the *same sentence* at least
+      twice in a document produce ``related_to`` (``method = cooccurrence``).
+
+    Explicit, typed edges always carry their page number and snippet so the UI
+    can justify them. A single shared sentence no longer creates a weak edge:
+    ``require_sentence_cooccurrence`` gates co-occurrence on repeated,
+    sentence-level sightings.
+    """
+    pages = prepare_graph_pages(pages)
+
+    labels = [concept.label for concept in concepts]
+    if len(labels) < 2:
+        return []
+
+    relations: Dict[Tuple[str, str, str], RelationCandidate] = {}
+    pair_counts: Counter = Counter()
+    pair_page: Dict[Tuple[str, str], int] = {}
+    per_concept: Counter = Counter()
+
+    for page_number, text in pages:
+        if not text:
+            continue
+        for sentence in _page_sentences(text):
+            lowered = sentence.lower()
+            present = [label for label in labels if label.lower() in lowered]
+            if len(present) < 2:
+                continue
+
+            # --- cue-phrase relations ----------------------------------
+            for pattern, relation_type, reversed_order in _CUE_PATTERNS:
+                if not pattern.search(sentence):
+                    continue
+                ordered = sorted(present, key=lambda item: lowered.find(item.lower()))
+                source, target = ordered[0], ordered[-1]
+                if reversed_order:
+                    source, target = target, source
+                if source == target:
+                    continue
+                key = (slugify(source), slugify(target), relation_type)
+                existing = relations.get(key)
+                if existing:
+                    existing.weight += 1.0
+                    continue
+                relations[key] = RelationCandidate(
+                    source=source,
+                    target=target,
+                    relation=relation_type,
+                    method="cue_phrase",
+                    weight=1.0,
+                    page_number=page_number,
+                    snippet=sentence.strip()[:280],
+                )
+
+            # --- co-occurrence candidate pairs --------------------------
+            for index, first in enumerate(present):
+                for second in present[index + 1 :]:
+                    pair = tuple(sorted((first, second)))
+                    pair_counts[pair] += 1
+                    pair_page.setdefault(pair, page_number)
+
+    # Co-occurrence edges, strongest first, capped per concept so the graph stays
+    # readable instead of dense. A weak association requires *repeated*
+    # sentence-level co-occurrence (single shared sentences are evidence-free
+    # noise and must not become edges).
+    for (first, second), count in pair_counts.most_common():
+        if require_sentence_cooccurrence and count < 2:
+            continue
+        if (
+            per_concept[first] >= max_relations_per_concept
+            or per_concept[second] >= max_relations_per_concept
+        ):
+            continue
+        key = (slugify(first), slugify(second), "related_to")
+        if key in relations:
+            continue
+        relations[key] = RelationCandidate(
+            source=first,
+            target=second,
+            relation="related_to",
+            method="cooccurrence",
+            weight=min(3.0, 0.5 + count * 0.25),
+            page_number=pair_page.get((first, second)),
+            snippet="",
+        )
+        per_concept[first] += 1
+        per_concept[second] += 1
+
+    return sorted(relations.values(), key=lambda item: item.weight, reverse=True)
+
+
+def candidate_labels(candidates: Sequence[ConceptCandidate]) -> List[str]:
+    """Labels only — used when the LLM is asked to type relationships."""
+    return [candidate.label for candidate in candidates]
+
+
+def filter_relations_to_labels(
+    relations: Iterable[RelationCandidate], labels: Sequence[str]
+) -> List[RelationCandidate]:
+    """Drop relations whose endpoints are not in the kept concept list."""
+    allowed = {normalize_for_match(label) for label in labels}
+    kept: List[RelationCandidate] = []
+    for relation in relations:
+        if (
+            normalize_for_match(relation.source) in allowed
+            and normalize_for_match(relation.target) in allowed
+        ):
+            kept.append(relation)
+    return kept

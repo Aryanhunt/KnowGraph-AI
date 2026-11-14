@@ -1,0 +1,248 @@
+/*
+ * KnowGraph AI — global styles and layout utilities (brief §16–§18).
+ *
+ * Only *primitives* live here (reset, typography, layout helpers). Component
+ * styling lives with each component so a redesign can swap either layer
+ * independently. Responsive rules target desktop first, then tablet.
+ */
+
+@import './tokens.css';
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--kg-background);
+  color: var(--kg-text);
+  font-family: var(--kg-font-sans);
+  font-size: var(--kg-font-size-base);
+  line-height: var(--kg-line-height);
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3, h4 {
+  margin: 0;
+  color: var(--kg-text);
+  font-weight: var(--kg-font-weight-semibold);
+  line-height: 1.25;
+}
+
+h1 { font-size: var(--kg-font-size-2xl); }
+h2 { font-size: var(--kg-font-size-xl); }
+h3 { font-size: var(--kg-font-size-lg); }
+h4 { font-size: var(--kg-font-size-base); }
+
+p { margin: 0 0 var(--kg-space-3); }
+
+a {
+  color: var(--kg-primary);
+  text-decoration: none;
+}
+a:hover { text-decoration: underline; }
+
+code, pre {
+  font-family: var(--kg-font-mono);
+  font-size: var(--kg-font-size-sm);
+}
+
+pre {
+  overflow: auto;
+  padding: var(--kg-space-3);
+  background: var(--kg-surface-alt);
+  border: 1px solid var(--kg-border);
+  border-radius: var(--kg-radius-md);
+}
+
+/* --- Accessibility ---------------------------------------------------- */
+:focus-visible {
+  outline: 2px solid var(--kg-primary);
+  outline-offset: 2px;
+}
+
+.kg-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* --- Layout primitives ------------------------------------------------ */
+.kg-stack { display: flex; flex-direction: column; gap: var(--kg-space-4); }
+.kg-stack-sm { display: flex; flex-direction: column; gap: var(--kg-space-2); }
+.kg-stack-lg { display: flex; flex-direction: column; gap: var(--kg-space-6); }
+.kg-row { display: flex; align-items: center; gap: var(--kg-space-3); }
+.kg-row-between { display: flex; align-items: center; justify-content: space-between; gap: var(--kg-space-3); }
+.kg-row-wrap { display: flex; flex-wrap: wrap; align-items: center; gap: var(--kg-space-2); }
+.kg-grow { flex: 1 1 auto; min-width: 0; }
+
+.kg-grid {
+  display: grid;
+  gap: var(--kg-space-4);
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+.kg-grid-2 { grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+.kg-grid-3 { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+.kg-grid-wide { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); }
+
+.kg-scroll-y { overflow-y: auto; }
+
+/* --- Enhanced Card styles (elevated, with hover) ----------------------- */
+.kg-card {
+  background: var(--kg-surface);
+  border: 1px solid var(--kg-border);
+  border-radius: var(--kg-radius-lg);
+  box-shadow: var(--kg-card-shadow);
+  transition: box-shadow var(--kg-transition), border-color var(--kg-transition);
+}
+.kg-card--elevated {
+  box-shadow: var(--kg-card-shadow-hover);
+  border-color: var(--kg-border-strong);
+}
+.kg-card--interactive:hover {
+  box-shadow: var(--kg-card-shadow-hover);
+  border-color: var(--kg-border-strong);
+}
+.kg-card--flat { box-shadow: none; border-color: var(--kg-border); }
+.kg-card--padded { padding: var(--kg-space-4); }
+.kg-card--lg { padding: var(--kg-space-5); }
+
+.kg-card__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--kg-space-3);
+  margin-bottom: var(--kg-space-3);
+}
+.kg-card__title {
+  font-size: var(--kg-font-size-lg);
+  font-weight: var(--kg-font-weight-semibold);
+  color: var(--kg-text);
+}
+.kg-card__subtitle {
+  color: var(--kg-muted);
+  font-size: var(--kg-font-size-sm);
+  margin: 0;
+}
+.kg-card__footer {
+  margin-top: var(--kg-space-3);
+  padding-top: var(--kg-space-3);
+  border-top: 1px solid var(--kg-border);
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--kg-space-2);
+  flex-wrap: wrap;
+}
+
+/* --- Hero / page heading ----------------------------------------------- */
+
+.kg-hero {
+  display: grid;
+  grid-template-columns: 1fr minmax(220px, 260px);
+  gap: var(--kg-space-6);
+  align-items: center;
+  padding: var(--kg-space-2) 0;
+}
+.kg-hero__eyebrow { margin-bottom: var(--kg-space-2); }
+.kg-hero__title {
+  font-family: var(--kg-font-serif, Georgia, serif);
+  font-size: clamp(1.75rem, 4vw, 2.75rem);
+  font-weight: 400;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  color: var(--kg-text);
+}
+.kg-hero__title em { font-style: italic; color: var(--kg-primary); }
+.kg-hero__title span { color: var(--kg-primary); }
+.kg-hero__copy {
+  margin-top: var(--kg-space-3);
+  color: var(--kg-text-soft);
+  font-size: var(--kg-font-size-base);
+  line-height: 1.65;
+  max-width: 520px;
+}
+.kg-hero__actions {
+  margin-top: var(--kg-space-4);
+  display: flex;
+  align-items: center;
+  gap: var(--kg-space-3);
+  flex-wrap: wrap;
+}
+.kg-hero__footnote {
+  margin-top: var(--kg-space-3);
+  color: var(--kg-muted);
+  font-size: var(--kg-font-size-xs);
+  display: flex;
+  align-items: center;
+  gap: var(--kg-space-1);
+}
+.kg-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kg-space-5);
+  max-width: var(--kg-content-max-width);
+  margin: 0 auto;
+  padding: var(--kg-space-5);
+}
+.kg-page-header { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: var(--kg-space-3); }
+.kg-page-title { display: flex; flex-direction: column; gap: var(--kg-space-1); }
+.kg-page-title h1 {
+  font-family: var(--kg-font-serif, Georgia, serif);
+  font-weight: 400;
+  letter-spacing: -0.5px;
+}
+.kg-page-title h1 span, .kg-page-title h1 em { color: var(--kg-primary); font-style: normal; }
+.kg-subtitle { color: var(--kg-muted); font-size: var(--kg-font-size-sm); margin: 0; }
+
+/* --- Text helpers ----------------------------------------------------- */
+.kg-text-muted { color: var(--kg-muted); }
+.kg-text-sm { font-size: var(--kg-font-size-sm); }
+.kg-text-xs { font-size: var(--kg-font-size-xs); }
+.kg-text-center { text-align: center; }
+.kg-mono { font-family: var(--kg-font-mono); }
+.kg-truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kg-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.kg-clamp-3 { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+
+/* --- Content prose (document pages, answers) -------------------------- */
+.kg-prose {
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--kg-text-soft);
+  line-height: 1.65;
+}
+.kg-prose strong { color: var(--kg-text); }
+.kg-snippet {
+  font-family: var(--kg-font-mono);
+  font-size: var(--kg-font-size-sm);
+  background: var(--kg-surface-alt);
+  border-left: 3px solid var(--kg-primary);
+  border-radius: var(--kg-radius-sm);
+  padding: var(--kg-space-3);
+  white-space: pre-wrap;
+}
+
+/* --- Scrollbars (subtle, still visible) ------------------------------- */
+* { scrollbar-width: thin; scrollbar-color: var(--kg-border-strong) transparent; }
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-thumb {
+  background: var(--kg-border-strong);
+  border: 3px solid transparent;
+  border-radius: var(--kg-radius-pill);
+  background-clip: content-box;
+}

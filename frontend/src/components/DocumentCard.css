@@ -1,0 +1,87 @@
+/* DocumentCard styles — tokens only (brief §17). */
+
+.kg-doc-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kg-space-3);
+  padding: var(--kg-space-4);
+  background: var(--kg-surface);
+  border: 1px solid var(--kg-border);
+  border-radius: var(--kg-radius-lg);
+  box-shadow: var(--kg-shadow-sm);
+  transition: box-shadow var(--kg-transition), border-color var(--kg-transition);
+}
+
+.kg-doc-card:hover {
+  box-shadow: var(--kg-shadow-md);
+  border-color: var(--kg-border-strong);
+}
+
+.kg-doc-card__top {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--kg-space-3);
+}
+
+.kg-doc-card__check { margin-top: 2px; }
+
+.kg-doc-card__icon {
+  flex: 0 0 auto;
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--kg-radius-md);
+  background: var(--kg-primary-soft);
+  color: var(--kg-primary);
+  font-size: var(--kg-font-size-xs);
+  font-weight: var(--kg-font-weight-semibold);
+  letter-spacing: 0.03em;
+}
+
+.kg-doc-card__title {
+  display: block;
+  padding: 0;
+  background: none;
+  border: none;
+  text-align: left;
+  font-family: inherit;
+  font-size: var(--kg-font-size-base);
+  font-weight: var(--kg-font-weight-semibold);
+  color: var(--kg-text);
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+.kg-doc-card__title:hover { color: var(--kg-primary); }
+
+.kg-doc-card__summary {
+  margin: 0;
+  color: var(--kg-text-soft);
+  font-size: var(--kg-font-size-sm);
+}
+
+.kg-doc-card__error {
+  padding: var(--kg-space-2) var(--kg-space-3);
+  background: var(--kg-danger-soft);
+  color: var(--kg-danger);
+  border-radius: var(--kg-radius-sm);
+  font-size: var(--kg-font-size-xs);
+}
+
+.kg-doc-card__meta,
+.kg-doc-card__topics {
+  gap: var(--kg-space-2);
+}
+
+.kg-doc-card__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--kg-space-3);
+  flex-wrap: wrap;
+  padding-top: var(--kg-space-3);
+  border-top: 1px solid var(--kg-border);
+}

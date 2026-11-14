@@ -1,0 +1,58 @@
+/* SourceCitation styles — tokens only (brief §17). */
+
+.kg-sources {
+  display: flex;
+  flex-direction: column;
+  gap: var(--kg-space-2);
+  margin-top: var(--kg-space-3);
+}
+
+.kg-citation {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--kg-space-2);
+  padding: var(--kg-space-2) var(--kg-space-3);
+  border: 1px solid var(--kg-border);
+  border-radius: var(--kg-radius-md);
+  background: var(--kg-surface-alt);
+  color: var(--kg-text);
+  font-size: var(--kg-font-size-sm);
+  text-decoration: none;
+}
+
+.kg-citation--link:hover {
+  border-color: var(--kg-primary);
+  background: var(--kg-primary-soft);
+  text-decoration: none;
+}
+
+.kg-citation__index {
+  color: var(--kg-primary);
+  font-weight: var(--kg-font-weight-semibold);
+}
+
+.kg-citation__icon { line-height: 1.4; }
+
+.kg-citation__main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.kg-citation__label {
+  font-weight: var(--kg-font-weight-medium);
+}
+
+.kg-citation__snippet {
+  color: var(--kg-muted);
+  font-size: var(--kg-font-size-xs);
+}
+
+.kg-citation__meta {
+  display: flex;
+  align-items: center;
+  gap: var(--kg-space-1);
+  flex-wrap: wrap;
+}

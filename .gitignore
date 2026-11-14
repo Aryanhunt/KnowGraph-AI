@@ -1,0 +1,18 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# --- Node ---
+node_modules/
+dist/
+
+# --- App state (never commit user data or secrets) ---
+backend/.env
+backend/storage/
+backend/logs/
+*.log
+.DS_Store
