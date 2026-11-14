@@ -17,8 +17,8 @@ WORKDIR /app/frontend
 # Copy package manifests
 COPY frontend/package.json frontend/package-lock.json ./
 
-# Install dependencies
-RUN npm ci --omit=dev
+# Install ALL dependencies (devDependencies needed for Vite build)
+RUN npm ci --include=dev --no-optional
 
 # Copy source and build
 COPY frontend/ .
