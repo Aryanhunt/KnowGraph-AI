@@ -1,0 +1,75 @@
+# =============================================================================
+# Render — Deploy KnowGraph AI via Git
+#
+# This file tells Render how to build and run your app.
+# Commit it to the repo root, then:
+#   1. Sign up at https://render.com
+#   2. Create a new → Web Service
+#   3. Connect this repo (KnowGraph-AI)
+#   4. Render auto-detects `render.yaml` and starts the deploy
+#
+# Requirements:
+#   - MongoDB connection string (use managed MongoDB or Atlas)
+#   - Ollama is NOT run in this container — mount a persistent volume or use
+#     Render's Ollama add-on if available, otherwise point OLLAMA_BASE_URL
+#     to a running Ollama service elsewhere.
+# =============================================================================
+
+services:
+  # ---------- Backend (Flask) + Frontend bundle ----------
+  - type: web
+    name: knowgraph-ai
+    runtime: docker
+    dockerfilePath: Dockerfile
+    envVars:
+      - key: PORT
+        value: 5003
+      - key: HOST
+        value: 0.0.0.0
+      - key: SECRET_KEY
+        description: JWT signing key — generate a random 32+ char string
+        sync: false
+      - key: MONGODB_URI
+        description: "MongoDB connection string (e.g. mongodb://...)"
+        sync: false
+      - key: OLLAMA_BASE_URL
+        description: "Ollama API URL (default: http://localhost:11434)"
+        value: http://localhost:11434
+      - key: LOG_LEVEL
+        value: INFO
+      - key: OCR_ENABLED
+        description: Set false if Tesseract isn't available on Render
+        value: "false"
+      - key: PROCESSING_SYNC
+        value: "true"
+      - key: PROCESSING_WORKERS
+        value: 1
+      - key: EMBEDDING_PROVIDER
+        value: ollama
+      - key: LLM_PROVIDER
+        value: ollama
+    # Persistent disk for uploaded files, pages, vectorstore
+    rootDisk:
+      derivation: mount
+      mountPath: /app/backend/storage
+      mountTag: knowgraph-storage
+      sizeGB: 10
+
+    # Rebuild on commit to `main`
+    autoDeploy: true
+    outageMaintenance: false
+
+  # ---------- Managed MongoDB (optional, free tier available) ----------
+  # If you want managed MongoDB on Render, add a second service:
+  #
+  # - type: mongodb
+  #   name: knowgraph-mongo
+  #   plan: free
+  #   region: oregon
+  #   envVars:
+  #     - key: MONGODB_URI
+  #       sync: false
+  #   disk:
+  #     name: knowgraph-mongo-data
+  #     mountPath: /data/db
+  #     sizeGB: 10
